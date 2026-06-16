@@ -2,6 +2,7 @@
 if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true) die();
 
 use Bitrix\Iblock\ElementTable;
+use Bitrix\Main\Application;
 use Bitrix\Main\Loader;
 use Bitrix\Main\SystemException;
 
@@ -21,10 +22,11 @@ class VendorFaq extends CBitrixComponent
 
 					// Регистрируем тег ТОЛЬКО для автоматического режима
 					if ($this->arParams['CACHE_TYPE'] === 'A') {
-						$this->getTaggedCache()->registerTag(
+						Application::getInstance()->getTaggedCache()->registerTag(
 							'iblock_id_' . $this->arParams['IBLOCK_ID']
 						);
 					}
+
 
 					$this->includeComponentTemplate();
 				} catch (\Throwable $e) {
