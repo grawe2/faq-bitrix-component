@@ -1,22 +1,38 @@
 <?php
 if (!defined('B_PROLOG_INCLUDED') || B_PROLOG_INCLUDED !== true) die();
-// Классы для работы с инфоблоком
-use Bitrix\Main\Loader;
+
 use Bitrix\Iblock\ElementTable;
-// Классы для кеширования
-use Bitrix\Main\Application;
-use Bitrix\Main\Data\Cache;
-// Класс для системных исключений
+use Bitrix\Main\Loader;
 use Bitrix\Main\SystemException;
+
 class VendorFaq extends CBitrixComponent
 {
 	public function executeComponent()
 	{
 		try {
 			$this->checkModules();
-			$this->getResult();
-			$this->includeComponentTemplate();
-		} catch (SystemException $e) {
+
+			// Всегда инициализируем arResult
+			$this->arResult = ['ITEMS' => []];
+
+			if ($this->startResultCache()) {
+				try {
+					$this->getResult();
+
+					// Регистрируем тег ТОЛЬКО для автоматического режима
+					if ($this->arParams['CACHE_TYPE'] === 'A') {
+						$this->getTaggedCache()->registerTag(
+							'iblock_id_' . $this->arParams['IBLOCK_ID']
+						);
+					}
+
+					$this->includeComponentTemplate();
+				} catch (\Throwable $e) {
+					$this->abortResultCache();
+					throw $e;
+				}
+			}
+		} catch (\Throwable $e) {
 			ShowError($e->getMessage());
 		}
 	}
@@ -28,76 +44,43 @@ class VendorFaq extends CBitrixComponent
 		}
 	}
 
-	// обработка массива $arParams (метод подключается автоматически)
 	public function onPrepareComponentParams($arParams)
 	{
-		// Время кеша
 		$arParams['CACHE_TIME'] = isset($arParams['CACHE_TIME']) ? (int)$arParams['CACHE_TIME'] : 3600;
-		if (!in_array($arParams['CACHE_TYPE'], ['A', 'Y', 'N'])) {
-			$arParams['CACHE_TYPE'] = 'A';
-		}
+		$arParams['CACHE_TYPE'] = in_array($arParams['CACHE_TYPE'], ['A', 'Y', 'N']) ? $arParams['CACHE_TYPE'] : 'A';
+		$arParams['IBLOCK_ID'] = isset($arParams['IBLOCK_ID']) ? (int)$arParams['IBLOCK_ID'] : 0;
+		$arParams['SECTION_ID'] = isset($arParams['SECTION_ID']) ? (int)$arParams['SECTION_ID'] : 0;
 		return $arParams;
 	}
 
 	protected function getResult()
 	{
-		$cacheType = $this->arParams['CACHE_TYPE'];
-		$cacheTime = $this->arParams['CACHE_TIME'];
-		$cacheId = md5(serialize($this->arParams));
-		$cachePath = '/vendor_faq/';
-
-
-		$cache = Cache::createInstance();
-		$taggedCache = Application::getInstance()->getTaggedCache();
-
-		// Проверяем кеш (только если не N)
-		if ($cacheType !== 'N' && $cache->initCache($cacheTime, $cacheId, $cachePath)) {
-			// Кеш есть — берём и выходим
-			$this->arResult = $cache->getVars();
-			return;
+		if ($this->arParams['IBLOCK_ID'] <= 0) {
+			throw new SystemException('Не указан ID инфоблока');
 		}
 
-		// Открываем запись кеша (только если не N)
-		if ($cacheType !== 'N') {
-			$cache->startDataCache();
+		$filter = [
+			'IBLOCK_ID' => $this->arParams['IBLOCK_ID'],
+			'ACTIVE' => 'Y',
+		];
+
+		// SECTION_ID может быть 0 — тогда показываем все элементы
+		if ($this->arParams['SECTION_ID'] > 0) {
+			$filter['IBLOCK_SECTION_ID'] = $this->arParams['SECTION_ID'];
 		}
 
-		// Для авто регистрируем тег инфоблока
-		if ($cacheType === 'A') {
-			$taggedCache->startTagCache($cachePath);
-			$taggedCache->registerTag('iblock_id_' . $this->arParams['IBLOCK_ID']);
-		}
-
-		// Получаем данные
 		$result = ElementTable::getList([
 			'select' => ['ID', 'NAME', 'PREVIEW_TEXT'],
-			'filter' => [
-				'IBLOCK_ID' => $this->arParams['IBLOCK_ID'],
-				'IBLOCK_SECTION_ID' => $this->arParams['SECTION_ID'],
-				'ACTIVE' => 'Y',
-			],
+			'filter' => $filter,
 			'order' => ['SORT' => 'ASC', 'ID' => 'ASC'],
 		]);
 
 		while ($element = $result->fetch()) {
-			$this->arResult['ITEMS'][] = $element;
+			$this->arResult['ITEMS'][] = [
+				'ID' => (int)$element['ID'],
+				'NAME' => (string)$element['NAME'],
+				'PREVIEW_TEXT' => $element['PREVIEW_TEXT'],
+			];
 		}
-
-		// Закрываем и сохраняем кеш
-		if ($cacheType === 'A') {
-			$taggedCache->endTagCache();
-		}
-		if ($cacheType !== 'N') {
-			$cache->endDataCache($this->arResult);
-		}
-
 	}
 }
-
-
-
-
-
-
-
-?>
